@@ -1,0 +1,22 @@
+{
+  "name": "sheepstack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "叠羊记 —— 保证有解的三消叠叠乐，面向抖音小游戏",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "balance": "node --experimental-strip-types tools/balance.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.5"
+  }
+}

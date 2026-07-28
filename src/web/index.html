@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>叠羊记 · 玩法 Demo</title>
+    <style>
+      :root {
+        --bg: #1d2a1f;
+        --panel: #26362a;
+        --line: #3a5040;
+        --text: #e8f0e6;
+        --accent: #8fd14f;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        display: flex;
+        justify-content: center;
+      }
+      #app { width: 100%; max-width: 480px; padding: 12px; position: relative; }
+      #hud { font-size: 14px; text-align: center; padding: 8px 0; color: #b8d0b0; }
+
+      #board { position: relative; width: 100%; margin: 4px 0 12px; }
+      .tile {
+        position: absolute;
+        width: 32px; height: 32px;
+        border-radius: 7px;
+        background: #6b5238;
+        border: 1px solid #4a3826;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 18px; line-height: 1;
+        filter: brightness(0.45);
+        transition: filter .12s;
+      }
+      .tile.free { filter: none; background: #c9a227; border-color: #8f7318; cursor: pointer; }
+      .tile.free:hover { transform: translateY(-1px); }
+      .tile.xray { filter: brightness(0.75); opacity: .85; }
+      .tile.hint { outline: 3px solid var(--accent); }
+
+      #slot {
+        /* 列数由 JS 按当前卡槽格数设置，「+1 卡槽」道具会把它变成 8 格 */
+        display: grid; gap: 4px;
+        background: var(--panel); border: 2px solid var(--line);
+        border-radius: 10px; padding: 6px; margin-bottom: 10px;
+      }
+      .cell {
+        aspect-ratio: 1; border-radius: 6px; background: #1a241c;
+        display: flex; align-items: center; justify-content: center; font-size: 18px;
+      }
+      .cell.filled { background: #c9a227; }
+
+      #items { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+      #items button {
+        flex: 1; min-width: 0; padding: 8px 2px; font-size: 12px; white-space: nowrap;
+        border-radius: 8px; border: 1px solid var(--line);
+        background: var(--panel); color: var(--text); cursor: pointer;
+      }
+      #items button.ad { border-color: #e0703a; color: #ffc9a8; }
+      #items button.diamond { border-color: #4aa3df; color: #bfe3ff; }
+      #items button:disabled { opacity: .35; cursor: not-allowed; }
+
+      #controls { display: flex; gap: 6px; align-items: center; font-size: 12px; margin-bottom: 8px; }
+      #controls button {
+        padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line);
+        background: transparent; color: var(--text); cursor: pointer; font-size: 12px;
+      }
+      label { display: flex; align-items: center; gap: 4px; color: #a8c0a0; margin-left: auto; }
+
+      #log {
+        white-space: pre-wrap; font-size: 11px; line-height: 1.5;
+        color: #86a37e; background: #16201a; border-radius: 8px;
+        padding: 8px; min-height: 90px; font-family: ui-monospace, monospace;
+      }
+
+      #overlay {
+        display: none; position: fixed; inset: 0; background: rgba(0,0,0,.72);
+        align-items: center; justify-content: center; z-index: 999;
+      }
+      #overlay-box {
+        background: var(--panel); border: 2px solid var(--line); border-radius: 14px;
+        padding: 22px; width: 300px; text-align: center;
+      }
+      #overlay-box h2 { margin: 0 0 8px; font-size: 20px; }
+      #overlay-box p { font-size: 13px; color: #b8d0b0; margin: 0 0 14px; }
+      button.big {
+        display: block; width: 100%; padding: 11px; margin-top: 8px;
+        border-radius: 9px; border: none; font-size: 14px; cursor: pointer;
+        background: var(--accent); color: #14200f; font-weight: 600;
+      }
+      button.big:nth-of-type(n+2) { background: #3a5040; color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="hud"></div>
+      <div id="board"></div>
+      <div id="slot"></div>
+      <div id="items"></div>
+      <div id="controls">
+        <button id="btn-prev">← 上一关</button>
+        <button id="btn-restart">重玩</button>
+        <button id="btn-next">下一关 →</button>
+        <button id="btn-hint">提示</button>
+        <label><input type="checkbox" id="toggle-nofill" />模拟广告无填充</label>
+      </div>
+      <div id="log"></div>
+    </div>
+    <div id="overlay"><div id="overlay-box"></div></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
