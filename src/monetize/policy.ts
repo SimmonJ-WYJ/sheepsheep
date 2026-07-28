@@ -31,6 +31,13 @@ export type AdPlacement =
   | 'item_sort'
   /** 道具箱：一次广告换 3 个随机道具，用来降低广告打断频次 */
   | 'item_box'
+  /**
+   * 看广告直接换钻石。
+   *
+   * 这是**不能充值的用户（iOS）唯一的钻石来源**，也是把免费用户变现的主要方式。
+   * 额度给得比别的位都宽，因为它同时承担「别把人堵死」和「赚钱」两件事。
+   */
+  | 'gems_for_ad'
   /** 每日签到奖励翻倍 */
   | 'daily_double'
   /** 牧场离线收益翻倍 */
@@ -117,6 +124,9 @@ export const DEFAULT_AD_POLICY: AdPolicy = {
     // 道具箱：一次广告给 3 个道具。
     // 单次价值更高 → 玩家更愿意看 → 打断次数反而更少，是更优的形态。
     item_box: rewarded(6, 1, 60_000),
+
+    // 看广告换钻石：每日 4 次。免费玩家的生命线，见 economy.ts
+    gems_for_ad: rewarded(4, Infinity, 30_000),
 
     daily_double: rewarded(1, Infinity, 0),
     offline_double: rewarded(3, Infinity, 0),

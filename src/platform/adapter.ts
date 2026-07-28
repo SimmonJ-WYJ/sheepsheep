@@ -40,6 +40,19 @@ export interface Storage {
 
 export type LaunchScene = 'default' | 'sidebar' | 'share' | 'unknown';
 
+/**
+ * 这台设备能不能做虚拟支付（充值）。
+ *
+ * **和「能不能玩」完全无关** —— 抖音小游戏在 Android 和 iOS 上都能正常打开、
+ * 正常玩、正常看广告。受限的只有虚拟支付这一个动作：
+ * 苹果要求数字商品走它的 IAP 并抽成，所以超级 App 的小游戏内购
+ * 在 iOS 上长期是关闭的。
+ *
+ * 这个政策一直在变，所以**绝不要在代码里硬编码「iOS 就是不能付」** ——
+ * 用运行时探测 + 远端可下发的开关，政策放开时不用重新发包。
+ */
+export type PaymentAvailability = 'available' | 'unsupported-platform' | 'unavailable';
+
 export interface PlatformAdapter {
   readonly name: string;
   now(): number;
@@ -48,6 +61,12 @@ export interface PlatformAdapter {
   createRewardedVideo(adUnitId: string): RewardedVideoAd;
   createInterstitial(adUnitId: string): InterstitialAd;
   createBanner(adUnitId: string): BannerAd | null;
+
+  /**
+   * 运行时探测这台设备能不能充值。
+   * 返回 'unsupported-platform' 时，所有充值入口连按钮都不该画。
+   */
+  paymentAvailability(): PaymentAvailability;
 
   /** 启动场景。抖音的侧边栏复访是一个不花广告成本的高价值召回位。 */
   launchScene(): LaunchScene;

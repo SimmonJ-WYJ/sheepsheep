@@ -1,4 +1,7 @@
 import type { ItemKind } from '../core/types.ts';
+import type { PaymentAvailability } from '../platform/adapter.ts';
+
+export type { PaymentAvailability };
 
 /**
  * 内购（充值）层。
@@ -33,9 +36,6 @@ import type { ItemKind } from '../core/types.ts';
  *
  * 换句话说：**广告卖次数，内购卖体验和身份。**
  */
-
-/** 这台设备能不能充值。见文件头的 iOS 约束。 */
-export type PaymentAvailability = 'available' | 'unsupported-platform' | 'unavailable';
 
 export type SkuId =
   /** 首充礼包，一次性 */

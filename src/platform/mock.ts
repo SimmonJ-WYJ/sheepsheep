@@ -2,6 +2,7 @@ import type {
   BannerAd,
   InterstitialAd,
   LaunchScene,
+  PaymentAvailability,
   PlatformAdapter,
   Recorder,
   RewardedResult,
@@ -24,6 +25,8 @@ export interface MockBehaviour {
   errorRate: number;
   /** 时钟由外部推进，便于测试冷却和跨天 */
   clock: { t: number };
+  /** 模拟这台设备能不能充值 —— 用来测 iOS 那条降级路径 */
+  payment: PaymentAvailability;
 }
 
 export class MockPlatform implements PlatformAdapter {
@@ -40,6 +43,7 @@ export class MockPlatform implements PlatformAdapter {
       endedRate: 1,
       errorRate: 0,
       clock: { t: 0 },
+      payment: 'available',
       ...behaviour,
     };
     const store = this.store;
@@ -94,6 +98,10 @@ export class MockPlatform implements PlatformAdapter {
 
   createBanner(): BannerAd | null {
     return { show(): void {}, hide(): void {}, destroy(): void {} };
+  }
+
+  paymentAvailability(): PaymentAvailability {
+    return this.behaviour.payment;
   }
 
   launchScene(): LaunchScene {

@@ -2,6 +2,7 @@ import type {
   BannerAd,
   InterstitialAd,
   LaunchScene,
+  PaymentAvailability,
   PlatformAdapter,
   Recorder,
   RewardedResult,
@@ -75,7 +76,9 @@ interface TTGlobal {
   getGameRecorderManager?(): TTRecorder;
   createGameRecorderManager?(): TTRecorder;
   showToast(opts: { title: string; icon?: string; duration?: number }): void;
-  getSystemInfoSync(): { windowWidth: number; windowHeight: number };
+  getSystemInfoSync(): { windowWidth: number; windowHeight: number; platform?: string };
+  /** 虚拟支付。iOS 上历来不存在，所以声明成可选。 */
+  requestGamePayment?(opts: Record<string, unknown>): void;
 }
 
 declare const tt: TTGlobal | undefined;
@@ -91,6 +94,19 @@ export function isDouyin(): boolean {
 
 /** 激励视频等待上限。超过就当失败处理，交给上层的 grantOnFailure 兜底。 */
 const REWARDED_TIMEOUT_MS = 12_000;
+
+/**
+ * iOS 上是否开放了虚拟支付。
+ *
+ * 默认 false（历来如此），但**故意做成一个可写的开关**：
+ * 政策放开时用远端配置把它打开就行，不需要重新发包送审。
+ * 千万不要把「iOS 不能付」写死在判断里。
+ */
+let iosPaymentEnabled = false;
+
+export function setIosPaymentEnabled(on: boolean): void {
+  iosPaymentEnabled = on;
+}
 
 class DouyinRewardedVideo implements RewardedVideoAd {
   private ad: TTRewardedVideoAd;
@@ -294,6 +310,25 @@ export class DouyinPlatform implements PlatformAdapter {
 
   createBanner(adUnitId: string): BannerAd | null {
     return new DouyinBanner(adUnitId);
+  }
+
+  /**
+   * 运行时探测能不能充值。
+   *
+   * 注意这和「能不能玩」无关 —— Android 和 iOS 都能正常玩、正常看广告。
+   * 探测顺序：有没有 tt → 有没有支付 API → 是不是 iOS 且未开放。
+   */
+  paymentAvailability(): PaymentAvailability {
+    const t = typeof tt !== 'undefined' ? tt : undefined;
+    if (!t) return 'unavailable';
+    if (typeof t.requestGamePayment !== 'function') return 'unsupported-platform';
+    try {
+      const plat = (t.getSystemInfoSync()?.platform ?? '').toLowerCase();
+      if (plat.includes('ios') && !iosPaymentEnabled) return 'unsupported-platform';
+    } catch {
+      return 'unavailable';
+    }
+    return 'available';
   }
 
   launchScene(): LaunchScene {
