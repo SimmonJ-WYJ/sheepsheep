@@ -25,10 +25,10 @@ export type AdPlacement =
   | 'revive'
   /** 单个道具补一次使用次数 */
   | 'item_undo'
-  | 'item_pop3'
-  | 'item_shuffle'
-  | 'item_xray'
-  | 'item_slot'
+  | 'item_addPen'
+  | 'item_hint'
+  | 'item_dog'
+  | 'item_sort'
   /** 道具箱：一次广告换 3 个随机道具，用来降低广告打断频次 */
   | 'item_box'
   /** 每日签到奖励翻倍 */
@@ -42,10 +42,10 @@ export type AdPlacement =
 
 export const ITEM_PLACEMENT: Record<ItemKind, AdPlacement> = {
   undo: 'item_undo',
-  pop3: 'item_pop3',
-  shuffle: 'item_shuffle',
-  xray: 'item_xray',
-  slot: 'item_slot',
+  addPen: 'item_addPen',
+  hint: 'item_hint',
+  dog: 'item_dog',
+  sort: 'item_sort',
 };
 
 export interface PlacementRule {
@@ -107,10 +107,12 @@ export const DEFAULT_AD_POLICY: AdPolicy = {
 
     // 单道具补充：每关每种最多 2 次，避免「无限道具」把关卡难度冲垮
     item_undo: rewarded(8, 2, 20_000),
-    item_pop3: rewarded(8, 2, 20_000),
-    item_shuffle: rewarded(8, 2, 20_000),
-    item_xray: rewarded(8, 2, 20_000),
-    item_slot: rewarded(4, 1, 30_000),
+    item_hint: rewarded(8, 2, 20_000),
+    item_sort: rewarded(8, 2, 20_000),
+    // 加栏位是本作最强的道具（直接放宽缓冲区），额度收得比别的紧
+    item_addPen: rewarded(5, 2, 30_000),
+    // 牧羊犬会送走一只羊，等于跳过一段解法，同样收紧
+    item_dog: rewarded(4, 1, 30_000),
 
     // 道具箱：一次广告给 3 个道具。
     // 单次价值更高 → 玩家更愿意看 → 打断次数反而更少，是更优的形态。

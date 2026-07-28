@@ -3,244 +3,401 @@ import assert from 'node:assert/strict';
 
 import { createRng } from '../src/core/rng.ts';
 import { makeLevel } from '../src/core/levels.ts';
-import { SheepGame } from '../src/core/game.ts';
+import { SortGame } from '../src/core/game.ts';
+import type { LevelConfig, Pens } from '../src/core/types.ts';
+import { isSolvable } from '../src/core/solver.ts';
+import { countSheep, topRun } from '../src/core/board.ts';
 
-function newGame(levelId = 30, seed = 777, now?: () => number) {
-  return new SheepGame({
+function newGame(levelId = 30, seed = 777, now?: () => number): SortGame {
+  return new SortGame({
     level: makeLevel(levelId),
     rng: createRng(seed),
     now: now ?? (() => 0),
   });
 }
 
-/** 沿当前 solution 一路打到底，返回是否通关。 */
-function finishAlongPath(game: SheepGame): boolean {
-  let guard = 0;
-  while (game.status === 'playing' && guard++ < 10_000) {
-    const next = game.solution.find((id) => {
-      const t = game.tiles.find((x) => x.id === id);
-      return t && t.state === 'stack';
-    });
-    if (next === undefined) break;
-    if (!game.canPick(next)) return false;
-    game.pick(next);
-  }
-  return game.status === 'won';
+/**
+ * 构造一个指定局面的游戏，用来测那些随机生成很难碰到的边界情况。
+ * `pens` 直接覆盖生成结果 —— 只在测试里这么用。
+ */
+function gameWithPens(pens: Pens, capacity: number, extra?: Partial<LevelConfig>): SortGame {
+  const level: LevelConfig = {
+    id: 999,
+    name: 'fixture',
+    penCapacity: capacity,
+    timeLimitSec: 0,
+    difficulty: { breedCount: 2, emptyPens: 2, minSolutionLength: 1 },
+    freeItems: { undo: 9, addPen: 9, hint: 9, sort: 9, dog: 9 },
+    ...extra,
+  };
+  const game = new SortGame({ level, rng: createRng(1), now: () => 0 });
+  game.pens = pens.map((p) => p.slice());
+  return game;
 }
 
-test('被压住的牌点不动', () => {
-  const game = newGame();
-  const covered = game.tiles.find((t) => t.coveredBy.length > 0 && !game.canPick(t.id));
-  assert.ok(covered, '应当存在被遮挡的牌');
-  const r = game.pick(covered.id);
-  assert.equal(r.ok, false);
-  assert.equal(r.ok === false && r.reason, 'not-free');
-});
-
-test('三张同图标自动消除', () => {
-  const game = newGame();
-  let clearedOnce = false;
-  for (const id of game.solution) {
-    const r = game.pick(id);
-    if (r.ok && r.cleared.length > 0) {
-      assert.equal(r.cleared.length % 3, 0, '每次消除都应当是 3 的倍数');
-      const icons = new Set(r.cleared.map((t) => game.effectiveIcon(t)));
-      assert.equal(icons.size, 1, '一次消除的三张图标应当相同');
-      clearedOnce = true;
-      break;
-    }
-  }
-  assert.ok(clearedOnce);
-});
-
-test('卡槽放满 7 格且没有消除就判负', () => {
-  const game = newGame(40, 31337);
+/** 一直随机走到分出胜负。 */
+function playRandom(game: SortGame, rng = createRng(4242)): void {
   let guard = 0;
-  while (game.status === 'playing' && guard++ < 5000) {
-    const inSlot = new Set(game.slot.map((t) => game.effectiveIcon(t)));
-    const free = game.freeTiles();
-    if (free.length === 0) break;
-    const bad = free.find((t) => !inSlot.has(game.effectiveIcon(t))) ?? free[0];
-    game.pick(bad.id);
+  while (game.status === 'playing' && guard++ < 3000) {
+    const moves = game.legalMoves();
+    if (moves.length === 0) break;
+    const m = moves[rng.int(moves.length)];
+    game.move(m.from, m.to);
   }
-  assert.equal(game.status, 'lost');
-  assert.equal(game.slot.length, game.slotCapacity, '判负时卡槽应当正好是满的');
-});
+}
 
-test('撤销能精确还原上一步（含被消除的三张）', () => {
-  const game = newGame();
-  // 走到一次消除发生为止，记下「刚点的那张」和「一起被消掉的三张」
-  let pickedId = -1;
-  let clearedIds: number[] = [];
-  for (const id of game.solution) {
-    const r = game.pick(id);
-    if (r.ok && r.cleared.length > 0) {
-      pickedId = id;
-      clearedIds = r.cleared.map((t) => t.id);
-      break;
-    }
-  }
-  assert.ok(clearedIds.length >= 3);
-  assert.ok(clearedIds.includes(pickedId), '触发消除的那张自己也在被消之列');
+// ------------------------------------------------------------------ 规则
 
-  const slotBefore = game.slot.map((t) => t.id);
-  const scoreBefore = game.score;
-  assert.equal(game.undo(), true);
-
-  // 刚点的那张要退回牌堆；和它一起消掉的另外两张要退回卡槽。
-  assert.equal(
-    game.tiles.find((x) => x.id === pickedId)?.state,
-    'stack',
-    '刚点的那张应当退回牌堆',
+test('品种不同的羊不能叠在一起', () => {
+  const game = gameWithPens(
+    [
+      [0, 0],
+      [1],
+      [],
+    ],
+    4,
   );
-  for (const id of clearedIds) {
-    if (id === pickedId) continue;
-    const t = game.tiles.find((x) => x.id === id);
-    assert.equal(t?.state, 'slot', `撤销后 ${id} 应当回到卡槽`);
-  }
-
-  assert.ok(game.score < scoreBefore, '撤销应当回退得分');
-  assert.ok(game.slot.length > slotBefore.length, '撤销后卡槽应当比消除完之后更满');
-  assert.equal(game.canPick(pickedId), true, '退回牌堆的那张应当可以再点一次');
+  assert.equal(game.canMove(0, 1), false, '0 号品种不能叠到 1 号品种上');
+  assert.equal(game.move(0, 1).ok, false);
+  assert.equal(game.canMove(0, 2), true, '空栏可以放');
 });
 
-test('撤销可以把判负的局面救回来', () => {
-  const game = newGame(40, 31337);
-  let guard = 0;
-  while (game.status === 'playing' && guard++ < 5000) {
-    const inSlot = new Set(game.slot.map((t) => game.effectiveIcon(t)));
-    const free = game.freeTiles();
-    if (free.length === 0) break;
-    const bad = free.find((t) => !inSlot.has(game.effectiveIcon(t))) ?? free[0];
-    game.pick(bad.id);
-  }
-  assert.equal(game.status, 'lost');
+test('满栏不能再放', () => {
+  const game = gameWithPens(
+    [
+      [0, 1, 1, 1],
+      [1],
+    ],
+    4,
+  );
+  assert.equal(game.canMove(1, 0), false, '第 0 栏已满');
+});
+
+test('一次能赶走栏口连续同品种的一整群', () => {
+  const game = gameWithPens(
+    [
+      [1, 0, 0, 0],
+      [0],
+    ],
+    4,
+  );
+  assert.deepEqual(topRun(game.pens[0]), { breed: 0, count: 3 });
+  const r = game.move(0, 1);
+  assert.equal(r.ok, true);
+  // 1 + 3 = 4 只同品种 → 立刻整栏出栏
+  assert.equal(r.ok === true && r.shipped, 0, '应当出栏 0 号品种');
+  assert.deepEqual(game.pens[1], [], '出栏后栏位空出来');
+  assert.deepEqual(game.pens[0], [1]);
+});
+
+test('空间不够时只赶走能装下的那几只', () => {
+  const game = gameWithPens(
+    [
+      [0, 0, 0],
+      [1, 0],
+    ],
+    4,
+  );
+  const r = game.move(0, 1);
+  assert.equal(r.ok, true);
+  assert.equal(game.pens[1].length, 4, '只能再装 2 只');
+  assert.equal(game.pens[0].length, 1, '第 0 栏还剩 1 只');
+});
+
+test('集满一栏同品种就出栏，且栏位可以复用', () => {
+  const game = gameWithPens(
+    [
+      [0, 0, 0],
+      [0],
+      [1, 1],
+    ],
+    4,
+  );
+  const before = countSheep(game.pens);
+  const r = game.move(1, 0);
+  assert.equal(r.ok === true && r.shipped, 0);
+  assert.equal(countSheep(game.pens), before - 4, '出栏 4 只');
+  assert.deepEqual(game.pens[0], []);
+  assert.equal(game.canMove(2, 0), true, '空出来的栏位应当可以再用');
+});
+
+test('一步都走不动就判负', () => {
+  // 随机乱走一定会把自己走死 —— 找一个真实的失败局面来验状态机
+  const lost = findLostGame();
+  assert.ok(lost, '在若干个高难关卡里应当能随机走到失败');
+  assert.equal(lost.status, 'lost');
+  assert.equal(lost.legalMoves().length, 0, '判负时应当确实一步都走不动');
+  assert.ok(lost.remaining > 0, '还有羊没出栏');
+});
+
+test('全部出栏即通关', () => {
+  const game = gameWithPens(
+    [
+      [0, 0, 0],
+      [0],
+    ],
+    4,
+  );
+  const r = game.move(1, 0);
+  assert.equal(r.ok === true && r.status, 'won');
+  assert.equal(game.remaining, 0);
+});
+
+// ------------------------------------------------------------------ 道具
+
+test('撤销精确还原上一步', () => {
+  const game = newGame(30, 555);
+  const before = game.pens.map((p) => p.slice());
+  const scoreBefore = game.score;
+
+  const mv = game.legalMoves()[0];
+  game.move(mv.from, mv.to);
+  assert.notDeepEqual(game.pens, before, '走了一步，局面应当变了');
+
+  assert.equal(game.undo(), true);
+  assert.deepEqual(game.pens, before, '撤销后局面应当完全还原');
+  assert.equal(game.score, scoreBefore);
+  assert.equal(game.moves, 0);
+});
+
+test('撤销能把判负的局面救回来', () => {
+  const game = findLostGame();
+  assert.ok(game);
   assert.equal(game.undo(), true);
   assert.equal(game.status, 'playing');
+  assert.ok(game.legalMoves().length > 0, '撤销之后应当又有路可走');
 });
 
-test('「移出」把卡槽最前面的牌退回牌堆，且退回的牌立刻可点', () => {
-  const game = newGame();
-  for (let i = 0; i < 3 && game.slot.length < 3; i++) {
-    const inSlot = new Set(game.slot.map((t) => game.effectiveIcon(t)));
-    const next = game.freeTiles().find((t) => !inSlot.has(game.effectiveIcon(t)));
-    if (next) game.pick(next.id);
-  }
-  const before = game.slot.length;
-  assert.ok(before > 0);
-
-  const moved = game.popBack(3);
-  assert.equal(moved, Math.min(3, before));
-  assert.equal(game.slot.length, before - moved);
-  // 退回牌堆的牌上面本来就没东西压着了，所以一定是可点的
-  for (const t of game.tiles) {
-    if (t.state === 'stack' && t.coveredBy.every((c) => game.tiles.find((x) => x.id === c)?.state !== 'stack')) {
-      assert.equal(game.canPick(t.id), true);
-      break;
-    }
-  }
+test('出栏之后撤销能把整栏羊还回来', () => {
+  const game = gameWithPens(
+    [
+      [0, 0, 0],
+      [0],
+      [1, 1],
+    ],
+    4,
+  );
+  const before = countSheep(game.pens);
+  game.move(1, 0);
+  assert.equal(countSheep(game.pens), before - 4);
+  assert.equal(game.undo(), true);
+  assert.equal(countSheep(game.pens), before, '撤销应当把出栏的 4 只还回来');
+  assert.deepEqual(game.pens[0], [0, 0, 0]);
 });
 
-test('洗牌之后依然保证有解（跑 20 个随机局面）', () => {
-  for (let s = 0; s < 20; s++) {
-    const game = newGame(35, 1000 + s);
-
-    // 先随便乱走一通，故意把自己走进一个可能的死路
-    let guard = 0;
-    while (game.status === 'playing' && guard++ < 12) {
-      const free = game.freeTiles();
-      if (free.length === 0) break;
-      game.pick(free[Math.floor(free.length / 2)].id);
-    }
-    if (game.status !== 'playing') continue;
-
-    assert.equal(game.reguarantee(), true, `seed ${s} 洗牌失败`);
-    assert.ok(
-      finishAlongPath(game),
-      `seed ${s} 洗牌之后沿新路径没能通关 —— 可解性保证被破坏了`,
-    );
-  }
+test('加栏位能把死局救活', () => {
+  const game = findLostGame();
+  assert.ok(game);
+  assert.equal(game.addPens(1), true);
+  assert.equal(game.status, 'playing', '多一个空栏位就有路可走了');
+  assert.ok(game.legalMoves().length > 0);
 });
 
-test('洗牌不会改变卡槽里已有的牌', () => {
-  const game = newGame(35, 4242);
-  let guard = 0;
-  while (game.status === 'playing' && game.slot.length < 3 && guard++ < 50) {
-    const inSlot = new Set(game.slot.map((t) => game.effectiveIcon(t)));
-    const next = game.freeTiles().find((t) => !inSlot.has(game.effectiveIcon(t)));
-    if (!next) break;
-    game.pick(next.id);
-  }
-  const before = game.slot.map((t) => [t.id, game.effectiveIcon(t)]);
-  game.reguarantee();
-  const after = game.slot.map((t) => [t.id, game.effectiveIcon(t)]);
-  assert.deepEqual(after, before, '洗牌只重排牌堆，不应该动卡槽');
-});
-
-test('提示在未偏离路径时给出可点的牌', () => {
-  const game = newGame();
-  for (let i = 0; i < 10; i++) {
+test('提示给出的一步合法，且走完之后依然有解', () => {
+  const game = newGame(45, 3131);
+  for (let i = 0; i < 6 && game.status === 'playing'; i++) {
     const h = game.hint();
-    assert.ok(h, '刚开局沿路径走，提示不应为空');
-    assert.equal(game.canPick(h.id), true);
-    game.pick(h.id);
+    assert.ok(h, '有解的局面应当能给出提示');
+    assert.equal(game.canMove(h.from, h.to), true, '提示的一步应当合法');
+    game.move(h.from, h.to);
+    if (game.status === 'playing') {
+      assert.equal(game.isSolvable(), true, '沿提示走之后应当仍然有解');
+    }
   }
 });
 
-test('洗牌之后提示恢复可用', () => {
-  const game = newGame(35, 606);
-  let guard = 0;
-  while (game.status === 'playing' && guard++ < 12) {
-    const free = game.freeTiles();
-    if (free.length === 0) break;
-    game.pick(free[free.length - 1].id);
-  }
-  game.reguarantee();
-  const h = game.hint();
-  assert.ok(h, '洗牌重算路径后提示应当可用');
-  assert.equal(game.canPick(h.id), true);
+test('重排之后局面有解、羊群构成不变', () => {
+  const game = newGame(50, 8080);
+  playRandomUntilStuckOrN(game, 10);
+  if (game.status !== 'playing') return;
+
+  const before = game.pens.flat().sort().join(',');
+  assert.equal(game.reshuffle(), true);
+  assert.equal(game.pens.flat().sort().join(','), before, '重排不该改变羊群构成');
+  assert.equal(game.isSolvable(), true, '重排之后必须有解');
 });
 
-test('连击在时间窗内累加，超时归零', () => {
+test('牧羊犬只在「叼走之后依然有解」时可用', () => {
+  // 容量 3，场上只有 3 只 0 号羊：叼走任意一只，剩下 2 只永远凑不满一栏
+  const game = gameWithPens(
+    [
+      [0, 0],
+      [0],
+      [],
+    ],
+    3,
+  );
+  assert.equal(game.isSolvable(), true, '原局面是有解的');
+  assert.deepEqual(game.dogTargets(), [], '任何一只都不能叼 —— 会变成永远无法通关');
+  assert.equal(game.canUseItem('dog'), false);
+  assert.equal(game.useItem('dog'), false);
+});
+
+test('牧羊犬能把无解的局面救回来（叼走那只多余的羊）', () => {
+  // 0 号和 1 号各 3 只（凑得满），外加一只孤零零的 2 号 ——
+  // 只要那只 2 号还在场上，它永远凑不满一栏，整局必然赢不了。
+  const game = gameWithPens(
+    [
+      [0, 0, 1],
+      [1, 1, 0],
+      [2],
+      [],
+    ],
+    3,
+  );
+  assert.equal(game.isSolvable(), false, '有一只孤零零的羊，这局赢不了');
+
+  const targets = game.dogTargets();
+  assert.deepEqual(targets, [2], `只有那只多余的羊能叼，实际 targets=${targets}`);
+
+  const before = countSheep(game.pens);
+  assert.equal(game.useItem('dog', 2), true);
+  assert.equal(countSheep(game.pens), before - 1);
+  assert.equal(game.isSolvable(), true, '叼走之后这局就能打通了');
+});
+
+test('道具用完就不能再用', () => {
+  const game = newGame(30, 1234);
+  const n = game.itemCount('hint');
+  for (let i = 0; i < n; i++) assert.equal(game.useItem('hint'), true);
+  assert.equal(game.useItem('hint'), false, '次数用完应当失败');
+  game.grantItem('hint', 1);
+  assert.equal(game.useItem('hint'), true, '补发之后可以再用');
+});
+
+// ------------------------------------------------------------------ 其他
+
+test('连击在时间窗内累加', () => {
   const clock = { t: 0 };
-  const game = newGame(20, 555, () => clock.t);
-  const combos: number[] = [];
-  for (const id of game.solution) {
-    const r = game.pick(id);
-    if (r.ok && r.cleared.length > 0) {
-      combos.push(r.combo);
-      if (combos.length >= 2) break;
-    }
-  }
-  assert.deepEqual(combos, [1, 2], '窗口内连续消除应当累加连击');
+  const timed = comboFixture(clock);
+  // 三组羊，每组差一只 —— 可以连续出栏三次
+  timed.pens = [
+    [0, 0, 0],
+    [0],
+    [1, 1, 1],
+    [1],
+    [2, 2, 2],
+    [2],
+  ];
 
-  // 把时钟推过连击窗口，再消除一次应当归 1
-  clock.t += 10_000;
-  for (const id of game.solution) {
-    const t = game.tiles.find((x) => x.id === id);
-    if (!t || t.state !== 'stack') continue;
-    const r = game.pick(id);
-    if (r.ok && r.cleared.length > 0) {
-      assert.equal(r.combo, 1, '超过连击窗口应当重新从 1 开始');
-      break;
-    }
-  }
+  const a = timed.move(1, 0);
+  assert.equal(a.ok === true && a.combo, 1);
+  const b = timed.move(3, 2);
+  assert.equal(b.ok === true && b.combo, 2, '窗口内连续出栏应当累加');
+  const c = timed.move(5, 4);
+  assert.equal(c.ok === true && c.combo, 3);
+  assert.ok(
+    (c.ok === true ? c.gained : 0) > (a.ok === true ? a.gained : 0),
+    '连击越高单次得分越高',
+  );
+});
+
+test('超过连击窗口就归零', () => {
+  const clock = { t: 0 };
+  const timed = comboFixture(clock);
+  timed.pens = [
+    [0, 0, 0],
+    [0],
+    [1, 1, 1],
+    [1],
+  ];
+
+  const a = timed.move(1, 0);
+  assert.equal(a.ok === true && a.combo, 1);
+
+  clock.t += 60_000; // 远超连击窗口
+  const b = timed.move(3, 2);
+  assert.equal(b.ok === true && b.combo, 1, '超过连击窗口应当重新从 1 开始');
 });
 
 test('限时关到点判负', () => {
   const clock = { t: 0 };
   const level = { ...makeLevel(40), timeLimitSec: 10 };
-  const game = new SheepGame({ level, rng: createRng(9), now: () => clock.t });
+  const game = new SortGame({ level, rng: createRng(9), now: () => clock.t });
   assert.equal(game.status, 'playing');
   clock.t += 11_000;
   game.tickTimeout();
   assert.equal(game.status, 'lost');
 });
 
-test('+1 卡槽道具确实放宽了判负阈值', () => {
-  const game = newGame(40, 2024);
-  const before = game.slotCapacity;
-  game.grantItem('slot', 1);
-  assert.equal(game.useItem('slot'), true);
-  assert.equal(game.slotCapacity, before + 1);
+test('评星按步数贴近最优解程度给', () => {
+  const game = newGame(35, 246);
+  const sol = game.hint() ? game.parMoves : 0;
+  assert.ok(sol > 0);
+  assert.equal(game.stars(), 0, '还没通关不给星');
+
+  // 沿最优解打通 → 3 星
+  let guard = 0;
+  while (game.status === 'playing' && guard++ < 500) {
+    const h = game.hint();
+    if (!h) break;
+    game.move(h.from, h.to);
+  }
+  assert.equal(game.status, 'won');
+  assert.equal(game.stars(), 3, `沿最优解通关应当 3 星（用了 ${game.moves} 步 / par ${game.parMoves}）`);
 });
+
+test('随机乱走也不会让引擎进入非法状态', () => {
+  for (let s = 0; s < 25; s++) {
+    const game = newGame(40, 1000 + s);
+    playRandom(game, createRng(s * 31));
+    assert.ok(['won', 'lost', 'playing'].includes(game.status));
+    // 每栏都不能超过容量
+    for (const pen of game.pens) {
+      assert.ok(pen.length <= game.penCapacity, `栏位超容量: ${pen.length}`);
+    }
+    // 羊只会出栏，不会凭空消失
+    assert.equal(game.remaining + game.shipped, game.level.difficulty.breedCount * game.penCapacity);
+  }
+});
+
+test('还能动但已经赢不了的局面也能被检测出来', () => {
+  // 0 号和 1 号各只有 2 只，容量 3 —— 永远凑不满一栏，但栏口还能来回搬
+  const game = gameWithPens(
+    [
+      [0, 1],
+      [1, 0],
+      [],
+    ],
+    3,
+  );
+  assert.ok(game.legalMoves().length > 0, '还有合法步');
+  assert.equal(game.isSolvable(), false, '但怎么走都赢不了');
+  assert.equal(game.status, 'playing', '引擎不会提前判负 —— 所以 UI 必须主动提示玩家用道具');
+  assert.equal(game.canUseItem('hint'), false, '无解时提示道具应当置灰');
+});
+
+function playRandomUntilStuckOrN(game: SortGame, n: number): void {
+  const rng = createRng(99);
+  for (let i = 0; i < n && game.status === 'playing'; i++) {
+    const moves = game.legalMoves();
+    if (moves.length === 0) break;
+    const m = moves[rng.int(moves.length)];
+    game.move(m.from, m.to);
+  }
+}
+
+function comboFixture(clock: { t: number }): SortGame {
+  return new SortGame({
+    level: {
+      id: 998,
+      name: 'combo',
+      penCapacity: 4,
+      timeLimitSec: 0,
+      difficulty: { breedCount: 2, emptyPens: 2, minSolutionLength: 1 },
+      freeItems: {},
+    },
+    rng: createRng(1),
+    now: () => clock.t,
+  });
+}
+
+/** 在几个高难关卡里随机乱走，找一个真实的失败局面。 */
+function findLostGame(): SortGame | null {
+  for (let s = 0; s < 60; s++) {
+    const game = newGame(50, 5000 + s);
+    playRandom(game, createRng(s * 7919 + 3));
+    if (game.status === 'lost') return game;
+  }
+  return null;
+}

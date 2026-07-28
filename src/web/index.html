@@ -2,114 +2,402 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-    <title>叠羊记 · 玩法 Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>羊群大整理 · 玩法 Demo</title>
     <style>
+      /*
+       * 黏土 3D 质感（claymorphism）：
+       * 靠多层 box-shadow 叠出「圆润有厚度」的手感，不依赖任何美术资源。
+       * 每个元素都是：外部柔和投影 + 内部高光 + 内部暗边。
+       */
       :root {
-        --bg: #1d2a1f;
-        --panel: #26362a;
-        --line: #3a5040;
-        --text: #e8f0e6;
-        --accent: #8fd14f;
+        --sky-1: #a8d8f0;
+        --sky-2: #cfeeda;
+        --grass: #7cc576;
+        --wood: #c8956c;
+        --wood-dark: #a9764f;
+        --ink: #3d4a3f;
+        --ink-soft: #6b7a6d;
+        --card: #fffdf7;
+        --accent: #ffb43f;
+        --accent-dark: #e08a1e;
+        --radius: 20px;
       }
-      * { box-sizing: border-box; }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --sky-1: #2b3a4a;
+          --sky-2: #26382f;
+          --grass: #3f6b47;
+          --wood: #6d5340;
+          --wood-dark: #4e3a2c;
+          --ink: #eef3ea;
+          --ink-soft: #a8b8a8;
+          --card: #2c3830;
+        }
+      }
+
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+      html, body { height: 100%; margin: 0; }
+
       body {
-        margin: 0;
-        font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-        background: var(--bg);
-        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+                     'Microsoft YaHei', sans-serif;
+        color: var(--ink);
+        background: linear-gradient(170deg, var(--sky-1) 0%, var(--sky-2) 55%, var(--grass) 100%);
+        background-attachment: fixed;
         display: flex;
         justify-content: center;
+        overflow-x: hidden;
       }
-      #app { width: 100%; max-width: 480px; padding: 12px; position: relative; }
-      #hud { font-size: 14px; text-align: center; padding: 8px 0; color: #b8d0b0; }
 
-      #board { position: relative; width: 100%; margin: 4px 0 12px; }
-      .tile {
+      #app {
+        width: 100%;
+        max-width: 460px;
+        padding: 14px 16px 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 13px;
+      }
+
+      /* ---------------------------------------------------- 顶部 HUD */
+
+      #hud {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .chip {
+        background: var(--card);
+        border-radius: 999px;
+        padding: 7px 14px;
+        font-size: 13px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        box-shadow:
+          0 4px 0 rgba(0,0,0,.10),
+          0 8px 16px rgba(0,0,0,.10),
+          inset 0 1px 0 rgba(255,255,255,.9);
+      }
+      .chip small { font-weight: 500; color: var(--ink-soft); font-size: 11px; }
+      #level-chip { background: var(--accent); color: #4a2c00; }
+      .spacer { flex: 1; }
+
+      /* 连击飘字 */
+      #combo {
+        position: fixed;
+        left: 50%;
+        top: 32%;
+        transform: translate(-50%, 0) scale(.6);
+        font-size: 40px;
+        font-weight: 800;
+        color: var(--accent);
+        text-shadow: 0 3px 0 var(--accent-dark), 0 8px 20px rgba(0,0,0,.25);
+        opacity: 0;
+        pointer-events: none;
+        z-index: 60;
+      }
+      #combo.pop { animation: combo-pop .8s cubic-bezier(.2,.9,.3,1) forwards; }
+      @keyframes combo-pop {
+        0%   { opacity: 0; transform: translate(-50%, 10px) scale(.5) rotate(-6deg); }
+        30%  { opacity: 1; transform: translate(-50%, -14px) scale(1.15) rotate(3deg); }
+        70%  { opacity: 1; transform: translate(-50%, -20px) scale(1) rotate(0deg); }
+        100% { opacity: 0; transform: translate(-50%, -46px) scale(.9); }
+      }
+
+      /* ---------------------------------------------------- 栏位 */
+
+      #pens {
+        display: grid;
+        gap: 10px 8px;
+        justify-content: center;
+        padding: 4px 0 8px;
+      }
+
+      .pen {
+        position: relative;
+        display: flex;
+        flex-direction: column-reverse;   /* 数组末尾（栏口）显示在上方 */
+        justify-content: flex-start;
+        align-items: center;
+        gap: 3px;
+        padding: 6px 5px;
+        border-radius: 16px 16px 20px 20px;
+        background: linear-gradient(180deg, var(--wood) 0%, var(--wood-dark) 100%);
+        box-shadow:
+          0 5px 0 rgba(0,0,0,.14),
+          0 10px 18px rgba(0,0,0,.16),
+          inset 0 2px 4px rgba(0,0,0,.28),
+          inset 0 -2px 0 rgba(255,255,255,.18);
+        cursor: pointer;
+        transition: transform .14s cubic-bezier(.3,1.4,.5,1), box-shadow .14s;
+      }
+      .pen:active { transform: translateY(2px); }
+
+      /* 被选中的栏位：整体抬起 */
+      .pen.selected {
+        transform: translateY(-5px);
+        box-shadow:
+          0 9px 0 rgba(0,0,0,.14),
+          0 16px 26px rgba(0,0,0,.22),
+          inset 0 2px 4px rgba(0,0,0,.28),
+          0 0 0 3px var(--accent);
+      }
+      /* 可以落脚的栏位：脉冲提示 */
+      .pen.droppable { animation: pulse 1.1s ease-in-out infinite; }
+      @keyframes pulse {
+        0%, 100% { box-shadow: 0 5px 0 rgba(0,0,0,.14), 0 10px 18px rgba(0,0,0,.16),
+                               inset 0 2px 4px rgba(0,0,0,.28), 0 0 0 0 rgba(255,180,63,.9); }
+        50%      { box-shadow: 0 5px 0 rgba(0,0,0,.14), 0 10px 18px rgba(0,0,0,.16),
+                               inset 0 2px 4px rgba(0,0,0,.28), 0 0 0 5px rgba(255,180,63,.45); }
+      }
+      .pen.hinted { outline: 3px dashed var(--accent); outline-offset: 3px; }
+
+      /* 空栏位标记：这是本作最宝贵的资源，视觉上要明确 */
+      .pen.empty::after {
+        content: '';
         position: absolute;
-        width: 32px; height: 32px;
-        border-radius: 7px;
-        background: #6b5238;
-        border: 1px solid #4a3826;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 18px; line-height: 1;
-        filter: brightness(0.45);
-        transition: filter .12s;
+        top: 50%; left: 50%;
+        width: 22px; height: 22px;
+        margin: -11px 0 0 -11px;
+        border-radius: 50%;
+        border: 2px dashed rgba(255,255,255,.5);
       }
-      .tile.free { filter: none; background: #c9a227; border-color: #8f7318; cursor: pointer; }
-      .tile.free:hover { transform: translateY(-1px); }
-      .tile.xray { filter: brightness(0.75); opacity: .85; }
-      .tile.hint { outline: 3px solid var(--accent); }
 
-      #slot {
-        /* 列数由 JS 按当前卡槽格数设置，「+1 卡槽」道具会把它变成 8 格 */
-        display: grid; gap: 4px;
-        background: var(--panel); border: 2px solid var(--line);
-        border-radius: 10px; padding: 6px; margin-bottom: 10px;
-      }
-      .cell {
-        aspect-ratio: 1; border-radius: 6px; background: #1a241c;
-        display: flex; align-items: center; justify-content: center; font-size: 18px;
-      }
-      .cell.filled { background: #c9a227; }
+      /* ---------------------------------------------------- 羊 */
 
-      #items { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-      #items button {
-        flex: 1; min-width: 0; padding: 8px 2px; font-size: 12px; white-space: nowrap;
-        border-radius: 8px; border: 1px solid var(--line);
-        background: var(--panel); color: var(--text); cursor: pointer;
+      .sheep {
+        width: 40px;
+        height: 33px;
+        border-radius: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 19px;
+        position: relative;
+        /* 黏土感：内部高光 + 内部暗边 + 外部柔影 */
+        box-shadow:
+          inset 0 3px 5px rgba(255,255,255,.6),
+          inset 0 -4px 6px rgba(0,0,0,.2),
+          0 3px 0 rgba(0,0,0,.14),
+          0 5px 9px rgba(0,0,0,.18);
+        transition: transform .18s cubic-bezier(.3,1.5,.5,1), box-shadow .18s;
       }
-      #items button.ad { border-color: #e0703a; color: #ffc9a8; }
-      #items button.diamond { border-color: #4aa3df; color: #bfe3ff; }
-      #items button:disabled { opacity: .35; cursor: not-allowed; }
 
-      #controls { display: flex; gap: 6px; align-items: center; font-size: 12px; margin-bottom: 8px; }
-      #controls button {
-        padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line);
-        background: transparent; color: var(--text); cursor: pointer; font-size: 12px;
+      /*
+       * 栏口那一群（点一下会被整群赶走）。
+       * 抬得必须够明显 —— 第一版只抬了 4px，实测截图上根本看不出来，
+       * 玩家不知道自己拿起了几只。
+       */
+      .sheep.lifted {
+        transform: translateY(-9px) scale(1.1);
+        box-shadow:
+          inset 0 3px 5px rgba(255,255,255,.7),
+          inset 0 -4px 6px rgba(0,0,0,.2),
+          0 6px 0 rgba(0,0,0,.16),
+          0 12px 18px rgba(0,0,0,.28),
+          0 0 0 2.5px var(--accent);
       }
-      label { display: flex; align-items: center; gap: 4px; color: #a8c0a0; margin-left: auto; }
+
+      .sheep.landing { animation: land .3s cubic-bezier(.2,1.6,.4,1); }
+      @keyframes land {
+        0%   { transform: translateY(-26px) scale(.86); }
+        60%  { transform: translateY(2px) scale(1.06); }
+        100% { transform: translateY(0) scale(1); }
+      }
+
+      /* 出栏：羊跑走 */
+      .sheep.leaving { animation: leave .42s ease-out forwards; }
+      @keyframes leave {
+        0%   { transform: translateY(0) scale(1); opacity: 1; }
+        35%  { transform: translateY(-16px) scale(1.14) rotate(-8deg); opacity: 1; }
+        100% { transform: translateY(-70px) scale(.5) rotate(16deg); opacity: 0; }
+      }
+
+      /* ---------------------------------------------------- 道具栏 */
+
+      #items {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 7px;
+      }
+      .item {
+        position: relative;
+        background: var(--card);
+        border: none;
+        border-radius: 16px;
+        padding: 9px 2px 7px;
+        font-family: inherit;
+        font-size: 10.5px;
+        font-weight: 600;
+        color: var(--ink);
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+        box-shadow:
+          0 4px 0 rgba(0,0,0,.12),
+          0 7px 12px rgba(0,0,0,.12),
+          inset 0 1px 0 rgba(255,255,255,.9);
+        transition: transform .12s, box-shadow .12s;
+      }
+      .item .glyph { font-size: 19px; line-height: 1; }
+      .item:active:not(:disabled) {
+        transform: translateY(3px);
+        box-shadow: 0 1px 0 rgba(0,0,0,.12), 0 3px 6px rgba(0,0,0,.12);
+      }
+      .item:disabled { opacity: .4; cursor: not-allowed; }
+      /* 角标：剩余次数 / 广告 / 钻石 */
+      .item .badge {
+        position: absolute;
+        top: -5px; right: -3px;
+        min-width: 18px;
+        padding: 1px 4px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 700;
+        color: #fff;
+        background: var(--ink-soft);
+        box-shadow: 0 2px 4px rgba(0,0,0,.2);
+      }
+      .item.free .badge { background: #4caf50; }
+      .item.ad   .badge { background: #ff7043; }
+      .item.diamond .badge { background: #42a5f5; }
+
+      /* ---------------------------------------------------- 底部工具 */
+
+      #tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+      #tools button {
+        background: rgba(255,255,255,.55);
+        border: none;
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--ink);
+        cursor: pointer;
+      }
+      @media (prefers-color-scheme: dark) {
+        #tools button { background: rgba(255,255,255,.14); }
+      }
+      #tools label {
+        display: flex; align-items: center; gap: 4px;
+        font-size: 11.5px; color: var(--ink); margin-left: auto;
+        background: rgba(255,255,255,.45); padding: 5px 10px; border-radius: 999px;
+      }
+      @media (prefers-color-scheme: dark) {
+        #tools label { background: rgba(255,255,255,.12); }
+      }
 
       #log {
-        white-space: pre-wrap; font-size: 11px; line-height: 1.5;
-        color: #86a37e; background: #16201a; border-radius: 8px;
-        padding: 8px; min-height: 90px; font-family: ui-monospace, monospace;
+        white-space: pre-wrap;
+        font-size: 10.5px;
+        line-height: 1.6;
+        color: var(--ink-soft);
+        background: rgba(255,255,255,.4);
+        border-radius: 14px;
+        padding: 9px 11px;
+        min-height: 62px;
+        font-family: ui-monospace, SFMono-Regular, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        #log { background: rgba(0,0,0,.22); }
       }
 
+      /* 无解警告条 */
+      #warn {
+        display: none;
+        background: #ffe0b2;
+        color: #8a4b00;
+        border-radius: 14px;
+        padding: 9px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        box-shadow: 0 3px 0 rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.7);
+      }
+      #warn.show { display: block; animation: land .3s ease-out; }
+
+      /* ---------------------------------------------------- 结算弹窗 */
+
       #overlay {
-        display: none; position: fixed; inset: 0; background: rgba(0,0,0,.72);
-        align-items: center; justify-content: center; z-index: 999;
+        display: none;
+        position: fixed; inset: 0;
+        background: rgba(20,30,22,.6);
+        backdrop-filter: blur(4px);
+        align-items: center; justify-content: center;
+        z-index: 100;
+        padding: 20px;
       }
-      #overlay-box {
-        background: var(--panel); border: 2px solid var(--line); border-radius: 14px;
-        padding: 22px; width: 300px; text-align: center;
+      #overlay.show { display: flex; }
+      #sheet {
+        background: var(--card);
+        border-radius: 28px;
+        padding: 26px 22px 22px;
+        width: 100%; max-width: 320px;
+        text-align: center;
+        box-shadow: 0 10px 0 rgba(0,0,0,.12), 0 24px 50px rgba(0,0,0,.34);
+        animation: sheet-in .34s cubic-bezier(.2,1.3,.4,1);
       }
-      #overlay-box h2 { margin: 0 0 8px; font-size: 20px; }
-      #overlay-box p { font-size: 13px; color: #b8d0b0; margin: 0 0 14px; }
-      button.big {
-        display: block; width: 100%; padding: 11px; margin-top: 8px;
-        border-radius: 9px; border: none; font-size: 14px; cursor: pointer;
-        background: var(--accent); color: #14200f; font-weight: 600;
+      @keyframes sheet-in {
+        from { transform: translateY(30px) scale(.94); opacity: 0; }
+        to   { transform: none; opacity: 1; }
       }
-      button.big:nth-of-type(n+2) { background: #3a5040; color: var(--text); }
+      #sheet .big-emoji { font-size: 52px; line-height: 1; }
+      #sheet h2 { margin: 10px 0 4px; font-size: 21px; }
+      #sheet p { margin: 0 0 16px; font-size: 13px; color: var(--ink-soft); line-height: 1.6; }
+      #sheet .stars { font-size: 26px; letter-spacing: 3px; margin-bottom: 6px; }
+
+      .btn {
+        display: block; width: 100%;
+        padding: 13px; margin-top: 9px;
+        border: none; border-radius: 16px;
+        font-family: inherit; font-size: 14.5px; font-weight: 700;
+        cursor: pointer;
+        background: var(--accent); color: #4a2c00;
+        box-shadow: 0 4px 0 var(--accent-dark), 0 8px 16px rgba(0,0,0,.18);
+        transition: transform .12s, box-shadow .12s;
+      }
+      .btn:active { transform: translateY(4px); box-shadow: 0 0 0 var(--accent-dark); }
+      .btn.ghost {
+        background: rgba(0,0,0,.06); color: var(--ink);
+        box-shadow: 0 3px 0 rgba(0,0,0,.10);
+      }
+      @media (prefers-color-scheme: dark) {
+        .btn.ghost { background: rgba(255,255,255,.12); }
+      }
     </style>
   </head>
   <body>
     <div id="app">
-      <div id="hud"></div>
-      <div id="board"></div>
-      <div id="slot"></div>
+      <div id="hud">
+        <div class="chip" id="level-chip">第 1 关</div>
+        <div class="chip"><span>🐑</span><span id="left">0</span><small>只</small></div>
+        <div class="chip"><span id="score">0</span><small>分</small></div>
+        <div class="spacer"></div>
+        <div class="chip"><span>💎</span><span id="gems">0</span></div>
+      </div>
+
+      <div id="warn"></div>
+      <div id="pens"></div>
       <div id="items"></div>
-      <div id="controls">
+
+      <div id="tools">
         <button id="btn-prev">← 上一关</button>
         <button id="btn-restart">重玩</button>
         <button id="btn-next">下一关 →</button>
-        <button id="btn-hint">提示</button>
         <label><input type="checkbox" id="toggle-nofill" />模拟广告无填充</label>
       </div>
+
       <div id="log"></div>
     </div>
-    <div id="overlay"><div id="overlay-box"></div></div>
+
+    <div id="combo"></div>
+    <div id="overlay"><div id="sheet"></div></div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

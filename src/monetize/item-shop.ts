@@ -1,5 +1,5 @@
 import type { ItemKind } from '../core/types.ts';
-import type { SheepGame } from '../core/game.ts';
+import type { SortGame } from '../core/game.ts';
 import type { AdManager } from './ad-manager.ts';
 import { ITEM_PLACEMENT } from './policy.ts';
 import type { Wallet } from './revive.ts';
@@ -23,15 +23,15 @@ export type ItemRequestResult =
 /** 道具的钻石价格。 */
 export const ITEM_PRICE: Record<ItemKind, number> = {
   undo: 20,
-  pop3: 30,
-  shuffle: 30,
-  xray: 25,
-  slot: 50,
+  hint: 25,
+  sort: 30,
+  addPen: 60,
+  dog: 50,
 };
 
 /** 道具箱一次开出的道具数量。 */
 const BOX_SIZE = 3;
-const BOX_POOL: ItemKind[] = ['undo', 'pop3', 'shuffle', 'xray'];
+const BOX_POOL: ItemKind[] = ['undo', 'hint', 'sort', 'addPen'];
 
 export class ItemShop {
   private ads: AdManager;
@@ -49,10 +49,11 @@ export class ItemShop {
    *   diamond→ 显示钻石价格
    *   locked → 置灰
    *
-   * 道具当前用下去没有效果时（比如卡槽是空的还点「移出」）一律置灰，
+   * 道具当前用下去没有效果时（比如一步都没走就点「撤销」、
+   * 或者牧羊犬叼走任何一只羊都会让局面变成无解）一律置灰，
    * 绝不放行到广告 —— 详见 game.canUseItem()。
    */
-  buttonState(game: SheepGame, kind: ItemKind): 'free' | 'ad' | 'diamond' | 'locked' {
+  buttonState(game: SortGame, kind: ItemKind): 'free' | 'ad' | 'diamond' | 'locked' {
     if (!game.canUseItem(kind)) return 'locked';
     if (game.itemCount(kind) > 0) return 'free';
     if (this.ads.check(ITEM_PLACEMENT[kind]).allowed) return 'ad';
@@ -61,7 +62,7 @@ export class ItemShop {
   }
 
   /** 直接用免费次数。 */
-  useFree(game: SheepGame, kind: ItemKind): ItemRequestResult {
+  useFree(game: SortGame, kind: ItemKind): ItemRequestResult {
     if (!game.canUseItem(kind)) return { ok: false, reason: 'no-effect' };
     return game.useItem(kind)
       ? { ok: true, source: 'free' }
@@ -69,7 +70,7 @@ export class ItemShop {
   }
 
   /** 看广告换一次使用机会，并立即使用。 */
-  async useByAd(game: SheepGame, kind: ItemKind): Promise<ItemRequestResult> {
+  async useByAd(game: SortGame, kind: ItemKind): Promise<ItemRequestResult> {
     // 先确认这道具真能起作用，再去播广告。顺序不能反。
     if (!game.canUseItem(kind)) return { ok: false, reason: 'no-effect' };
 
@@ -87,7 +88,7 @@ export class ItemShop {
   }
 
   /** 钻石购买并使用。 */
-  useByDiamond(game: SheepGame, kind: ItemKind): ItemRequestResult {
+  useByDiamond(game: SortGame, kind: ItemKind): ItemRequestResult {
     if (!game.canUseItem(kind)) return { ok: false, reason: 'no-effect' };
     if (!this.wallet.spend(ITEM_PRICE[kind])) return { ok: false, reason: 'insufficient' };
     game.grantItem(kind, 1);
@@ -102,7 +103,7 @@ export class ItemShop {
    * 对留存和 eCPM 都更友好。放在关卡开始前的准备页，是主推形态。
    */
   async openBox(
-    game: SheepGame,
+    game: SortGame,
     pick: (pool: ItemKind[]) => ItemKind,
   ): Promise<{ ok: boolean; items: ItemKind[]; fallback?: boolean }> {
     if (!this.ads.check('item_box').allowed) return { ok: false, items: [] };

@@ -246,7 +246,7 @@ class DouyinRecorder implements Recorder {
       try {
         ttOrThrow().shareAppMessage({
           channel: 'video',
-          title: '我在叠羊记通关了',
+          title: '我在羊群大整理通关了',
           extra: { videoPath, hashtag_list: hashtags, videoTopType: 1 },
           success: () => resolve(true),
           fail: () => resolve(false),

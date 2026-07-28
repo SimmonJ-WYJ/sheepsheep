@@ -1,36 +1,41 @@
-import type { SheepGame } from '../core/game.ts';
+import type { SortGame } from '../core/game.ts';
 import type { AdManager } from './ad-manager.ts';
 
 /**
  * 失败 → 看广告 → 继续 的完整流程。
  *
+ * 本作的失败条件是「一步都走不动」（所有栏位都满、栏口没有任何同品种可叠），
+ * 所以复活的形式是**送空栏位** —— 直接给回缓冲区，这是玩家此刻最需要的东西。
+ *
  * 设计要点（这部分是最容易做坏的地方）：
  *
- * **递减补偿。** 第 1 次广告复活清 3 张，第 2 次清 2 张，之后只能花钻石。
- * 如果每次都清一样多，玩家就能靠无限看广告硬拖过任何关卡 ——
+ * **递减补偿。** 第 1 次广告复活给 2 个空栏位，第 2 次给 1 个，之后只能花钻石。
+ * 如果每次都给一样多，玩家就能靠无限看广告硬拖过任何关卡 ——
  * 关卡难度失去意义，通关也不再有成就感，长期反而没人看广告了。
  * 递减让「广告复活」是一次救援，而不是一条捷径。
  *
- * **复活后重新保证有解。** 见 game.revive()。
- * 玩家花 30 秒看完广告，换来的必须是一个真能打通的局面。
- * 如果复活回去发现还是死局，这 30 秒就变成了纯粹的欺骗感 —— 这是最伤留存的体验。
+ * **复活后必须真的能打通。** 见 `game.revive()`：
+ * 加完栏位会用求解器验一遍，万一还是死的（比如玩家把局面走得太烂），
+ * 就自动重排成一个保证有解的局面。
+ * 玩家花 30 秒看完广告，换来的必须是一个真能打通的局面 ——
+ * 如果复活回去发现还是死局，这 30 秒就变成了纯粹的欺骗感，最伤留存。
  *
  * **兜底也算数。** 广告没加载出来（无填充），照样复活。
  * 玩家永远不该为我们的填充率买单。
  */
 
 export type ReviveOffer =
-  | { kind: 'ad'; tilesCleared: number; attempt: number }
-  | { kind: 'diamond'; tilesCleared: number; cost: number; attempt: number }
+  | { kind: 'ad'; extraPens: number; attempt: number }
+  | { kind: 'diamond'; extraPens: number; cost: number; attempt: number }
   | { kind: 'none'; reason: string };
 
-/** 广告复活的递减梯度。数组长度 = 允许的广告复活次数。 */
-export const AD_REVIVE_LADDER = [3, 2];
+/** 广告复活的递减梯度：给几个空栏位。数组长度 = 允许的广告复活次数。 */
+export const AD_REVIVE_LADDER = [2, 1];
 /** 广告用完之后的钻石复活，价格递增。 */
 export const DIAMOND_REVIVE_LADDER = [
-  { cost: 60, tiles: 3 },
-  { cost: 120, tiles: 3 },
-  { cost: 240, tiles: 3 },
+  { cost: 60, pens: 2 },
+  { cost: 120, pens: 2 },
+  { cost: 240, pens: 2 },
 ];
 
 export interface Wallet {
@@ -57,15 +62,13 @@ export class ReviveController {
     return this.attempts;
   }
 
-  /**
-   * 当前该给玩家看什么复活选项。UI 直接照着这个渲染即可。
-   */
+  /** 当前该给玩家看什么复活选项。UI 直接照着这个渲染即可。 */
   offer(): ReviveOffer {
     const adIndex = this.attempts;
     if (adIndex < AD_REVIVE_LADDER.length) {
       const gate = this.ads.check('revive');
       if (gate.allowed) {
-        return { kind: 'ad', tilesCleared: AD_REVIVE_LADDER[adIndex], attempt: this.attempts + 1 };
+        return { kind: 'ad', extraPens: AD_REVIVE_LADDER[adIndex], attempt: this.attempts + 1 };
       }
       // 广告位被频控挡住（比如日上限到了），降级到钻石而不是直接结束。
     }
@@ -75,7 +78,7 @@ export class ReviveController {
       const step = DIAMOND_REVIVE_LADDER[dIndex];
       return {
         kind: 'diamond',
-        tilesCleared: step.tiles,
+        extraPens: step.pens,
         cost: step.cost,
         attempt: this.attempts + 1,
       };
@@ -86,29 +89,29 @@ export class ReviveController {
 
   /**
    * 执行一次广告复活。
-   * @returns 是否真的复活了
+   * @returns ok 是否真的复活了；fallback 是否为广告兜底发放
    */
-  async reviveByAd(game: SheepGame): Promise<{ ok: boolean; fallback: boolean; tiles: number }> {
+  async reviveByAd(game: SortGame): Promise<{ ok: boolean; fallback: boolean; pens: number }> {
     const offer = this.offer();
-    if (offer.kind !== 'ad') return { ok: false, fallback: false, tiles: 0 };
+    if (offer.kind !== 'ad') return { ok: false, fallback: false, pens: 0 };
 
     const outcome = await this.ads.request('revive');
-    if (!outcome.granted) return { ok: false, fallback: false, tiles: 0 };
+    if (!outcome.granted) return { ok: false, fallback: false, pens: 0 };
 
     this.attempts++;
-    game.revive(offer.tilesCleared);
-    return { ok: true, fallback: outcome.fallback, tiles: offer.tilesCleared };
+    const revived = game.revive(offer.extraPens);
+    return { ok: revived, fallback: outcome.fallback, pens: offer.extraPens };
   }
 
   /** 钻石复活。 */
-  reviveByDiamond(game: SheepGame): { ok: boolean; tiles: number } {
+  reviveByDiamond(game: SortGame): { ok: boolean; pens: number } {
     const offer = this.offer();
-    if (offer.kind !== 'diamond') return { ok: false, tiles: 0 };
-    if (!this.wallet.spend(offer.cost)) return { ok: false, tiles: 0 };
+    if (offer.kind !== 'diamond') return { ok: false, pens: 0 };
+    if (!this.wallet.spend(offer.cost)) return { ok: false, pens: 0 };
 
     this.attempts++;
-    game.revive(offer.tilesCleared);
-    return { ok: true, tiles: offer.tilesCleared };
+    const revived = game.revive(offer.extraPens);
+    return { ok: revived, pens: offer.extraPens };
   }
 }
 

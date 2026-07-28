@@ -1,100 +1,79 @@
 /**
- * 核心数据结构。这一层完全不依赖渲染和平台 SDK，
- * 可以在 Node / 浏览器 / 抖音小游戏运行时里原样跑。
+ * 《羊群大整理》核心数据结构。
+ *
+ * 玩法：有限个栏位，每个栏位能站 C 只羊。把混在一起的羊按品种归到一起，
+ * 一栏集满同品种 C 只 → 整栏出栏（羊跑走），栏位空出来接着用。
+ * 全部羊出栏即通关；一步都走不动即失败。
+ *
+ * 这一层完全不依赖渲染和平台 SDK，Node / 浏览器 / 抖音小游戏都能原样跑。
  */
 
-/** 图标 id。三张相同 icon 即可消除。 */
-export type IconId = number;
+/** 品种 id（决定羊的颜色和外观）。同品种才能叠在一起。 */
+export type Breed = number;
 
 /**
- * 组 id。生成器内部用「组」来证明可解性（每组恰好 3 张牌），
- * 但玩家看到的是 icon —— 多个组可以复用同一个 icon（见 deck.ts 的说明）。
+ * 栏位状态。`pens[i]` 是第 i 个栏位，数组下标 0 是**栏底**，末尾是**栏口**。
+ * 只有栏口的羊能被赶走 —— 这就是全部的信息约束，没有暗牌。
  */
-export type GroupId = number;
+export type Pens = Breed[][];
 
-export type TileState = 'stack' | 'slot' | 'cleared';
-
-/** 特殊牌。当前引擎只实现 wild（可证明不破坏可解性），其余见 docs/02。 */
-export type SpecialKind = 'wild';
-
-export interface Tile {
-  id: number;
-  icon: IconId;
-  group: GroupId;
-  /** 层号，越大越靠上，越靠上越先可点。 */
-  layer: number;
-  /** 左上角坐标，单位是「半张牌」。一张牌占 2×2。 */
-  x: number;
-  y: number;
-  /** 压在这张牌上面的牌 id（这些牌全部移走后，本牌才可点）。 */
-  coveredBy: number[];
-  /** 本牌压住的牌 id。 */
-  covers: number[];
-  state: TileState;
-  special?: SpecialKind;
-}
-
-export interface LayerSpec {
-  /** 该层可用的横向格数（单位：半张牌），实际落点按 2 取步长。 */
-  width: number;
-  height: number;
-  /** 该层放几张牌。 */
+/**
+ * 一次移动：把 `from` 栏口连续同品种的 `count` 只羊赶到 `to` 栏。
+ * 允许一次赶一群，是这个品类的标准操作，也大幅降低了操作次数。
+ */
+export interface Move {
+  from: number;
+  to: number;
   count: number;
-  /** 相对基准原点的偏移，用于制造层与层之间的错位遮挡。 */
-  offsetX: number;
-  offsetY: number;
 }
 
-/** 底部「牌河」：若干条竖直堆叠的牌垛，只有最上面一张可点。 */
-export interface RiverSpec {
-  stacks: number;
-  depth: number;
-}
+export type ItemKind =
+  /** 撤销一步 */
+  | 'undo'
+  /** 临时加一个空栏位 */
+  | 'addPen'
+  /** 提示下一步（由 solver 算出） */
+  | 'hint'
+  /** 牧羊犬叼走 1 只羊。只在「叼走之后依然有解」时可用 */
+  | 'dog'
+  /** 重排剩余的羊，换一个保证有解的新局面 */
+  | 'sort';
 
-export interface DeckLayout {
-  layers: LayerSpec[];
-  river?: RiverSpec;
-}
+export type GameStatus = 'playing' | 'won' | 'lost';
 
 export interface DifficultyKnobs {
+  /** 品种数。每个品种恰好 C 只羊（C = 栏位容量）。 */
+  breedCount: number;
+  /** 空栏位数量 = 缓冲区大小。**这是最有效的难度旋钮**，越少越难。 */
+  emptyPens: number;
   /**
-   * 允许同时「开着」的组数上限。越大越难（卡槽压力越大）。
-   * 引擎会强制 clamp 到 slotCapacity - 1，这是可解性证明的前提，见 solvable.ts。
+   * 生成时容许的最小解法步数。越大越需要提前规划。
+   * 生成器会重抽直到满足（或用尽尝试次数）。
    */
-  maxOpenGroups: number;
-  /** 生成解法路径时，三类动作的权重：开新组 / 补到 2 张 / 凑齐消除。 */
-  weightNewGroup: number;
-  weightGrow: number;
-  weightComplete: number;
-  /** 图标种类数。种类越少，越容易「意外提前消除」，越简单。 */
-  iconCount: number;
-  /** 万能牌数量。 */
-  wildCount: number;
+  minSolutionLength: number;
 }
 
 export interface LevelConfig {
   id: number;
   name: string;
-  layout: DeckLayout;
+  /** 每个栏位站几只羊。经典配置是 4。 */
+  penCapacity: number;
   difficulty: DifficultyKnobs;
-  /** 卡槽格数，经典玩法是 7。 */
-  slotCapacity: number;
   /** 限时（秒）。0 表示不限时。 */
   timeLimitSec: number;
   /** 每种道具的免费次数。 */
   freeItems: Partial<Record<ItemKind, number>>;
 }
 
-export type ItemKind = 'undo' | 'pop3' | 'shuffle' | 'xray' | 'slot';
-
-export type GameStatus = 'playing' | 'won' | 'lost';
-
 export interface GameSnapshot {
   status: GameStatus;
-  slot: Tile[];
-  slotCapacity: number;
+  pens: Pens;
+  penCapacity: number;
+  /** 场上还剩几只羊 */
   remaining: number;
-  cleared: number;
+  /** 已经出栏几只 */
+  shipped: number;
   combo: number;
   score: number;
+  moves: number;
 }

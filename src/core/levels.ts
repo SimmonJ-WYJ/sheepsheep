@@ -1,4 +1,4 @@
-import type { LevelConfig, LayerSpec } from './types.ts';
+import type { LevelConfig } from './types.ts';
 
 /**
  * 难度曲线。
@@ -7,93 +7,73 @@ import type { LevelConfig, LayerSpec } from './types.ts';
  * 落差本身是它的传播引擎，但代价是没有中段 —— 玩家在第 2 关卡死后就流失了，
  * 没有任何「我在变强」的反馈。
  *
- * 这里铺一条连续曲线，把那个落差保留下来，但只放在特定位置（见 SPIKE_LEVELS），
- * 让它成为「话题关」而不是「劝退墙」：
+ * 这里铺一条连续曲线，把那个落差保留下来，但只放在特定位置（SPIKE_LEVELS），
+ * 让它成为「话题关」而不是「劝退墙」。
  *
- *   1-3    教学：卡槽 7 格，牌少，图标 3~4 种，几乎不可能输
- *   4-10   入门：加层数，图标到 6 种
- *   11-25  进阶：牌河出现，卡槽压力开始要规划
- *   26-60  熟练：限时进场，maxOpenGroups 逼近 capacity-1
- *   61+    大师：程序化生成，缓慢逼近上限
- *
- * 每 10 关插一个「尖峰关」，难度陡增 —— 这是留给短视频传播的素材位。
+ * 三个旋钮，按有效性排序：
+ *   emptyPens   —— 空栏位数量 = 缓冲区大小。**最有效**，从 3 个收到 1 个，难度是量级差异
+ *   breedCount  —— 品种数，决定局面规模和需要同时追踪的信息量
+ *   penCapacity —— 每栏容量，4 是手感最好的值，只在后期升到 5
  */
 
 /** 尖峰关：难度显著高于邻居，用来制造「XX 关我卡了三天」的话题。 */
 const SPIKE_LEVELS = new Set([10, 20, 35, 50, 66, 88]);
 
-function layers(count: number, base: number, shrink: number): LayerSpec[] {
-  const out: LayerSpec[] = [];
-  for (let i = 0; i < count; i++) {
-    const w = Math.max(4, base - i * shrink);
-    const h = Math.max(4, base - i * shrink);
-    out.push({
-      width: w,
-      height: h,
-      // 每层比下层少 ~25%，形成金字塔
-      count: Math.max(3, Math.round(((w / 2) * (h / 2)) * 0.55)),
-      offsetX: (i % 2) * 1,
-      offsetY: (i % 2) * 1,
-    });
-  }
-  return out;
-}
-
-/** 线性插值 + clamp。 */
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * Math.max(0, Math.min(1, t));
 }
 
 export function makeLevel(id: number): LevelConfig {
   const spike = SPIKE_LEVELS.has(id);
-  // t 从 0 平滑走到 1（第 80 关封顶），尖峰关额外前移 0.25 的进度。
-  const t = Math.min(1, (id - 1) / 79 + (spike ? 0.25 : 0));
+  // t 从 0 平滑走到 1（第 80 关封顶），尖峰关额外前移 0.22 的进度。
+  const t = Math.min(1, (id - 1) / 79 + (spike ? 0.22 : 0));
 
-  const slotCapacity = 7;
-  const layerCount = Math.round(lerp(2, 7, t));
-  const gridBase = Math.round(lerp(8, 14, t));
+  /*
+   * 容量固定 4。
+   * 试过后期升到 5，实测（tools/balance.ts）只是把局面拉长，并没有更有趣，
+   * 而且 9 品种 × 5 只 = 45 只羊在手机竖屏上太挤，栏位画得又细又高。
+   */
+  const penCapacity = 4;
 
-  // maxOpenGroups 是真正的难度旋钮：越接近上限(=capacity-2=5)，越要求提前规划。
-  // 用 t^1.5 让它在中后段才开始明显上抬，避免中段就把普通玩家挡在门外。
-  const maxOpenGroups = Math.round(lerp(2, slotCapacity - 2, Math.pow(t, 1.5)));
+  // 品种数 3 → 9。用 t^0.7 让它**早期涨得快一些** ——
+  // 不然第 11~19 关会是一路 100% 通过的白板（第一版就是这个毛病）。
+  const breedCount = Math.round(lerp(3, 9, Math.pow(t, 0.7)));
 
-  // 图标种类越多越难凑；种类少则容易「意外提前消除」。
-  // 封顶 9 —— 实测再往上加，普通玩家通过率会断崖式下跌（见 tools/balance.ts）。
-  const iconCount = Math.round(lerp(3, 9, t));
+  /*
+   * 空栏位是最狠的旋钮，直接决定有多少回旋余地。
+   * 分三段而不是插值 —— 这个值只有 3/2/1 三种可能，插值只会让台阶落在奇怪的地方。
+   *   3 个：教学期，随便走都不会死
+   *   2 个：主体区间，需要想一下
+   *   1 个：后期和尖峰关，必须提前规划（普通打法通过率会掉到 20% 上下）
+   */
+  let emptyPens = t < 0.09 ? 3 : t < 0.62 ? 2 : 1;
+  if (spike) emptyPens = 1;
 
-  const timeLimitSec = id >= 26 ? Math.round(lerp(300, 150, (id - 26) / 54)) : 0;
+  // 要求生成的解法不能太短，否则一眼就看穿了，没有解谜感。
+  const minSolutionLength = Math.round(lerp(4, 26, t));
+
+  // 限时从第 30 关进场，且给得宽松 —— 这个品类的乐趣在思考，
+  // 时间压力只用来给后期加一点紧张感，不该成为主要失败原因。
+  const timeLimitSec = id >= 30 ? Math.round(lerp(300, 180, (id - 30) / 50)) : 0;
 
   return {
     id,
     name: spike ? `第 ${id} 关 · 尖峰` : `第 ${id} 关`,
-    slotCapacity,
+    penCapacity,
     timeLimitSec,
-    layout: {
-      layers: layers(layerCount, gridBase, 2),
-      river: id >= 11 ? { stacks: Math.round(lerp(3, 8, t)), depth: Math.round(lerp(2, 4, t)) } : undefined,
-    },
-    difficulty: {
-      maxOpenGroups,
-      // 前期偏向「补齐」（好打），后期偏向「开新组」（卡槽吃紧）
-      weightNewGroup: lerp(1, 4.5, t),
-      weightGrow: 3,
-      weightComplete: lerp(6, 2.5, t),
-      iconCount,
-      // 万能牌默认关闭，见 docs/02 的「特殊牌」小节
-      wildCount: 0,
-    },
+    difficulty: { breedCount, emptyPens, minSolutionLength },
     freeItems: {
       // 前 5 关道具管够，先把使用习惯养出来，之后再收紧、由广告补给
       undo: id <= 5 ? 5 : 1,
-      pop3: id <= 5 ? 3 : 1,
-      shuffle: id <= 5 ? 3 : 1,
-      xray: id <= 5 ? 3 : 1,
-      slot: 0,
+      addPen: id <= 5 ? 2 : 0,
+      hint: id <= 5 ? 3 : 1,
+      sort: id <= 5 ? 2 : 1,
+      dog: 0,
     },
   };
 }
 
-/** 每日挑战：全服同一副牌，用日期做 seed。 */
+/** 每日挑战：全服同一副局面，用日期做 seed。 */
 export function makeDailyLevel(dateKey: string): LevelConfig {
   const level = makeLevel(45);
   return { ...level, id: -1, name: `每日挑战 · ${dateKey}`, timeLimitSec: 240 };
