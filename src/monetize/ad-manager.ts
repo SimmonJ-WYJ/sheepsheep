@@ -31,7 +31,9 @@ export type BlockReason =
   | 'daily-cap'
   | 'format-daily-cap'
   | 'level-cap'
-  | 'disabled';
+  | 'disabled'
+  /** 玩家买了月卡或去广告，插屏对他免了。 */
+  | 'entitled';
 
 export interface AdEvent {
   placement: AdPlacement;
@@ -61,6 +63,14 @@ export interface AdManagerOptions {
   /** 应用冷启动时间戳；不传就取当前时间。 */
   bootAt?: number;
   onEvent?: (e: AdEvent) => void;
+  /**
+   * 玩家是否已经买了「免插屏」权益（月卡 / 去广告）。
+   *
+   * 只影响**插屏和 banner**。激励视频永远不受影响 ——
+   * 那是玩家自愿点开、能换到东西的，付费用户也一样想要，
+   * 顺手一起去掉等于白白断掉他们继续贡献广告收入的路。
+   */
+  isInterstitialFree?: () => boolean;
 }
 
 export class AdManager {
@@ -69,6 +79,7 @@ export class AdManager {
   private policy: AdPolicy;
   private bootAt: number;
   private onEvent?: (e: AdEvent) => void;
+  private isInterstitialFree: () => boolean;
 
   private day: DayState;
   private lastAnyAdAt = -Infinity;
@@ -86,6 +97,7 @@ export class AdManager {
     this.policy = opts.policy ?? DEFAULT_AD_POLICY;
     this.bootAt = opts.bootAt ?? this.platform.now();
     this.onEvent = opts.onEvent;
+    this.isInterstitialFree = opts.isInterstitialFree ?? (() => false);
     this.day = this.loadDay();
   }
 
@@ -104,6 +116,12 @@ export class AdManager {
     this.rolloverIfNeeded(now);
 
     if (rule.dailyCap === 0) return { allowed: false, reason: 'disabled' };
+
+    // 买了月卡 / 去广告的玩家，插屏和 banner 一律不出。
+    // 激励视频不在此列 —— 见 AdManagerOptions.isInterstitialFree 的说明。
+    if (rule.format !== 'rewarded' && this.isInterstitialFree()) {
+      return { allowed: false, reason: 'entitled' };
+    }
 
     // banner 不参与频控，它是常驻的
     if (rule.format === 'banner') return { allowed: true };
