@@ -8,3 +8,6 @@ dist-web/
 # 抖音包的构建产物（用 npm run build:douyin 生成）
 douyin/game.js
 dist-canvas/
+
+# 软著源代码文档是构建产物（npm run copyright 生成）
+copyright/源代码.txt

@@ -14,7 +14,8 @@
     "balance": "node --experimental-strip-types tools/balance.ts",
     "typecheck": "tsc --noEmit",
     "build:douyin": "vite build --config vite.douyin.config.ts",
-    "dev:canvas": "vite --config vite.canvas.config.ts"
+    "dev:canvas": "vite --config vite.canvas.config.ts",
+    "copyright": "node --experimental-strip-types tools/copyright-doc.ts"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
