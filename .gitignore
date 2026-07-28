@@ -4,3 +4,7 @@ dist-web/
 *.log
 .DS_Store
 .vite/
+
+# 抖音包的构建产物（用 npm run build:douyin 生成）
+douyin/game.js
+dist-canvas/

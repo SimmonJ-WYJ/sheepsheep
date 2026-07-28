@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>羊群大整理 · Canvas（与抖音包同一套渲染）</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #1b221a; }
+      body { display: grid; place-items: center; }
+      /* 模拟竖屏手机 */
+      #wrap { width: 390px; height: 844px; max-width: 100vw; max-height: 100vh; position: relative; }
+      canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+    </style>
+  </head>
+  <body>
+    <div id="wrap"><canvas id="c"></canvas></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

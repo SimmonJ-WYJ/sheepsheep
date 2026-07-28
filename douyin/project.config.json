@@ -1,0 +1,9 @@
+{
+  "appid": "REPLACE_ME_DOUYIN_APPID",
+  "projectname": "sheepsort",
+  "setting": {
+    "es6": false,
+    "minified": true,
+    "urlCheck": true
+  }
+}

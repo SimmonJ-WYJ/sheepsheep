@@ -7,7 +7,7 @@
 
 1. **研究** —— 《羊了个羊》为什么会爆，以及它为什么又迅速退潮（`docs/01`）
 2. **实现** —— 可运行的游戏核心 + 求解器 + 广告与内购变现层，
-   85 个单测，一个能玩的浏览器 Demo
+   96 个单测，可打包上传抖音
 
 ## 玩法
 
@@ -162,6 +162,7 @@
 | [03 广告与变现设计](docs/03-广告与变现设计.md) | 广告位全表、复活流程、频控矩阵、调优方法 |
 | [04 抖音小游戏接入](docs/04-抖音小游戏接入.md) | `tt.*` API、侧边栏、录屏发布、上线清单 |
 | [05 盈利模型](docs/05-盈利模型.md) | **什么时候看广告、什么时候让他充值**；商品表、触发表、定价理由 |
+| [06 上线与资质清单](docs/06-上线与资质清单.md) | **版号 / 软著 / 企业主体要办什么**、两条上线路径、上线前检查清单 |
 
 ## 代码结构
 
@@ -186,7 +187,14 @@ src/
 │   ├── adapter.ts        平台抽象接口
 │   ├── douyin.ts         抖音实现（预加载、超时兜底、防连点、支付能力探测）
 │   └── mock.ts           测试实现（可模拟无填充）
-├── web/                  浏览器 Demo（黏土 3D 质感，纯 CSS，支持深色模式）
+├── render/               ★ Canvas 渲染层 —— 抖音包和浏览器跑同一套
+│   ├── host.ts           宿主抽象（douyin / browser 两个实现）
+│   ├── layout.ts         布局数学（纯函数，11 个单测覆盖多屏多栏位）
+│   ├── draw.ts           黏土质感原语（canvas 没有 box-shadow，手工画三层）
+│   ├── scene.ts          绘制 + 命中区域（同一帧算出，不会画错位置）
+│   └── app.ts            把 core + monetize + 输入串起来
+├── canvas-dev/           Canvas 版的浏览器开发入口
+├── web/                  早期 DOM Demo（黏土 3D 质感，纯 CSS）
 └── tools/
     ├── bots.ts           三档模拟玩家（含束搜索）
     └── balance.ts        关卡难度体检
@@ -198,11 +206,15 @@ src/
 
 ```bash
 npm install
-npm run dev        # 浏览器 Demo → http://localhost:5173  （#level=60 可直达关卡）
-npm test           # 85 个单测
-npm run balance    # 关卡难度体检
-npm run typecheck  # 严格模式类型检查
+npm run dev:canvas   # ★ Canvas 版（和抖音包同一套渲染）→ http://localhost:5174
+npm run build:douyin # 打抖音小游戏包 → douyin/game.js（42KB / gzip 15KB）
+npm run dev          # 早期 DOM Demo → http://localhost:5173
+npm test             # 96 个单测
+npm run balance      # 关卡难度体检
+npm run typecheck    # 严格模式类型检查
 ```
+
+`#level=66` 可以直达指定关卡。
 
 Demo 里有 **「模拟广告无填充」** 开关，用来验证兜底逻辑 ——
 这条路径真机上很难复现，但线上一定会遇到。
@@ -215,7 +227,7 @@ Demo 里有 **「模拟广告无填充」** 开关，用来验证兜底逻辑 �
 - ✅ 抖音平台适配层
 - ✅ 难度曲线 + 数值体检工具（含束搜索机器人）
 - ✅ 浏览器 Demo（黏土 3D 质感 / 深色模式 / 出栏与连击动效）
-- ⬜ Cocos Creator 渲染层（正式包）
+- ✅ **抖音小游戏包**（纯 Canvas，无引擎，`npm run build:douyin` 直接产出）
 - ⬜ 服务端：排行榜、存档、分数校验、**内购收据校验**
 - ⬜ 牧场养成系统
 - ⬜ 暗羊 / 炸弹羊 / 特殊栏位（会重新引入不完全信息，需先评估平衡）
